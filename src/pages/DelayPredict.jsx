@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Field } from '../components/ui.jsx'
 import { FIELDS, emptyValues, currentTimeValues, validate, buildPayload } from '../lib/predictionConfig.js'
-import { predictDelay, IS_DEMO, API_URL } from '../lib/predictionApi.js'
+import { predictDelay, warmUp, IS_DEMO, API_URL } from '../lib/predictionApi.js'
 import { api } from '../lib/api.js'
 
 /* the estimate note: always visible next to the result */
@@ -76,6 +76,8 @@ export default function DelayPredict() {
   const loading = status.state === 'loading'
 
   useEffect(() => () => ctrl.current?.abort(), [])   // cancel a running request when leaving the page
+  useEffect(() => { warmUp() }, [])                   // wake the prediction service while the user fills in the form
+  const [slow, setSlow] = useState(false)
 
   /* if the hospitals manage a fleet, fill "Ambulances available nearby" with the real free count (the user can still change it) */
   const [fleet, setFleet] = useState(null)
@@ -110,6 +112,8 @@ export default function DelayPredict() {
     ctrl.current?.abort()
     ctrl.current = new AbortController()
     setStatus({ state: 'loading' })
+    setSlow(false)
+    const slowTimer = setTimeout(() => setSlow(true), 6000)
     try {
       const result = await predictDelay(buildPayload(values), { signal: ctrl.current.signal })
       if (id !== reqId.current) return
@@ -118,6 +122,9 @@ export default function DelayPredict() {
       if (id !== reqId.current || err.kind === 'cancelled') return
       if (err.fieldErrors) setErrors(err.fieldErrors)
       setStatus({ state: 'error', error: err })
+    } finally {
+      clearTimeout(slowTimer)
+      setSlow(false)
     }
   }
 
@@ -172,6 +179,7 @@ export default function DelayPredict() {
                 {loading ? <><span className="spin sm" aria-hidden="true" /> Predicting...</> : 'Predict Response Delay'}
               </button>
             </div>
+            {loading && slow && <p className="small muted" role="status" style={{ marginTop: 12 }}>The prediction service is waking up (free hosting). This can take up to a minute the first time.</p>}
             <p className="small muted" style={{ marginTop: 12 }}>The estimate is for information only and does not dispatch an ambulance.</p>
           </form>
         </div>

@@ -11,12 +11,13 @@
                         "range": { "low": 5.8, "high": 9.1 },     (optional)
                         "range_note": "...", "warnings": ["..."],   (optional)
                         "model_version": "random-forest-v1" }      (optional)
-   The service lives in MediBridge_ml (app.py, run on port 8000).
+   The service lives in the MediBridge-ml repository (main.py, FastAPI). Default path: /predict/response-delay.
    ===================================================================== */
 
 const BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
 const PATH = import.meta.env.VITE_PREDICT_PATH || '/predict/response-delay'
-const TIMEOUT_MS = 15000
+// Render's free plan puts the service to sleep when idle; waking it up can take about a minute.
+const TIMEOUT_MS = 60000
 
 export const API_URL = BASE + PATH
 export const IS_DEMO = !BASE || import.meta.env.VITE_USE_MOCK === 'true'
@@ -24,6 +25,12 @@ export const IS_DEMO = !BASE || import.meta.env.VITE_USE_MOCK === 'true'
 export class PredictionError extends Error {
   /* kind: network | timeout | validation | server | response | cancelled */
   constructor(kind, message, fieldErrors) { super(message); this.kind = kind; this.fieldErrors = fieldErrors }
+}
+
+/* Called when the prediction page opens: wakes a sleeping service so the first real prediction is fast. */
+export function warmUp() {
+  if (IS_DEMO) return
+  fetch(BASE + '/health', { method: 'GET' }).catch(() => {})
 }
 
 export async function predictDelay(payload, { signal } = {}) {
