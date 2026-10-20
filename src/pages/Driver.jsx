@@ -15,10 +15,16 @@ export default function Driver() {
   const s = useStore('mb_session', null);
   const mine = useFetch(() => api.get('/ambulances/mine'), [], { interval: 5000 });
   const amb = mine.data ? mine.data.data.ambulance : null;
+  const assignedCase = amb && amb.assignedCase ? String(amb.assignedCase) : '';
+  const isDemoCase = /\bdemo\b/i.test(assignedCase);
+  const canConfirmPickup = amb && amb.status === 'assigned' && assignedCase && !isDemoCase;
 
   const [sharing, setSharing] = useState(false);
   const [gpsMsg, setGpsMsg] = useState('');
   const [lastSent, setLastSent] = useState(null);
+  const [pickupBusy, setPickupBusy] = useState(false);
+  const [pickupErr, setPickupErr] = useState('');
+  const [pickupOk, setPickupOk] = useState('');
   const watchId = useRef(null), lastPos = useRef(null), timer = useRef(null);
 
   const stop = () => {
@@ -26,6 +32,7 @@ export default function Driver() {
     clearInterval(timer.current); watchId.current = null; setSharing(false);
   };
   useEffect(() => stop, []); // eslint-disable-line  (stop sharing when leaving the page)
+  useEffect(() => { setPickupErr(''); setPickupOk(''); }, [assignedCase]);
 
   const start = () => {
     if (!navigator.geolocation) { setGpsMsg('This browser cannot share GPS. Use a phone browser.'); return; }
@@ -47,6 +54,20 @@ export default function Driver() {
   const setStatus = async (status) => {
     try { await api.patch('/ambulances/mine/status', { body: { status } }); mine.reload(); toast(status === 'available' ? 'You are available for dispatch' : 'You are offline'); }
     catch (ex) { toast(ex.message); }
+  };
+
+  const confirmPickup = async () => {
+    if (!canConfirmPickup || pickupBusy) return;
+    setPickupBusy(true); setPickupErr(''); setPickupOk('');
+    try {
+      const r = await api.post('/ambulances/mine/cases/' + encodeURIComponent(assignedCase) + '/pickup');
+      setPickupOk(r.message || 'Pickup confirmed.');
+      toast(r.message || 'Patient pickup confirmed');
+      mine.reload();
+    } catch (ex) {
+      setPickupErr(ex.message);
+    }
+    setPickupBusy(false);
   };
 
   return (
@@ -92,7 +113,17 @@ export default function Driver() {
             <button className="b-out" disabled={amb.status === 'assigned' || amb.status === 'offline'} onClick={() => setStatus('offline')}>Go offline</button>
           </div>
           {amb.status === 'assigned' && (
-            <p className="small muted" style={{ marginTop: 12 }}>You are on an active case. <a className="lnk" href={'#/tracking?case=' + amb.assignedCase}>Open live tracking for {amb.assignedCase}</a></p>
+            <>
+              <p className="small muted" style={{ marginTop: 12 }}>You are on an active case. <a className="lnk" href={'#/tracking?case=' + amb.assignedCase}>Open live tracking for {amb.assignedCase}</a></p>
+              {canConfirmPickup && (
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+                  <button className="b-primary" disabled={pickupBusy} onClick={confirmPickup}>{pickupBusy ? 'Confirming…' : 'Confirm patient pickup'}</button>
+                </div>
+              )}
+              {isDemoCase && <p className="small muted" style={{ marginTop: 8 }}>Pickup confirmation is hidden for demo cases to keep demo stage controls unchanged.</p>}
+              {pickupErr && <p className="err" style={{ marginTop: 8 }}>{pickupErr}</p>}
+              {pickupOk && <p className="small" style={{ marginTop: 8, color: '#065f46' }}>{pickupOk}</p>}
+            </>
           )}
           {amb.location && amb.location.updatedAt && <p className="small muted" style={{ marginTop: 8 }}>Last position on record: {fmtTime(amb.location.updatedAt)} ({amb.location.source}).</p>}
         </div>
